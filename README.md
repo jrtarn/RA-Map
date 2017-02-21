@@ -1,2 +1,2 @@
 # RA-Map
-RA Map Analaysis Scripts
+RA Map Analysis Scripts
