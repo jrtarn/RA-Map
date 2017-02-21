@@ -1,0 +1,77 @@
+library(caret)
+library(limma)
+
+###### Dummy data ######## 2 groups and an "SDAI" like variable with some covariates and unrelated variables.
+
+sim = data.frame(1:200)
+colnames(sim) = "Patient"
+sim$Patient <- paste("Patient", sim$Patient, sep = "")
+students=1:2
+sim$Groups =(sample(students,200, replace = T))
+sim[,3:202] = 1
+colnames(sim)[3:202]  = paste("Gene", 1:200, sep = "")
+
+sim[3] = (sim[2] *4) + (2*runif(200,min = 1, max = 2.5))
+
+covariates = sim[4:12]
+for (y in seq(covariates))
+  covariates[y] = sim[3] + 2* runif(200,min = 1, max = 2.5)
+sim[4:12] = covariates
+
+unrelatedgenes = sim[13:ncol(sim)]
+for (y in seq(unrelatedgenes))
+  unrelatedgenes[y] = runif(200,min = 6, max = 27)
+
+sim[13:ncol(sim)] = unrelatedgenes
+
+
+dummydata = sim[4:200]
+T6M_SDAIscore = sim[[3]]
+
+
+
+###### David's modified PLSLoop Script ########
+
+
+tCtrl <- trainControl(method = 'repeatedcv', repeats = 10, summaryFunction = defaultSummary, classProbs = FALSE)
+
+# This list controls the inner CV loop, where the univariate filter is applied. 
+
+filt <- list(summary =defaultSummary,
+             fit  = function(x, y) {
+               train(x, y, method = 'pls', 
+                     preProc = c('center', 'scale'),
+                     trControl = tCtrl)
+             },
+             pred    = function(object, x) predict(object, x),
+             
+             score   = function(x, y) {  
+               # This code presumes you've got a clinical data file named pheno
+               # and are ranking genes by the p-value of their F-statistic 
+               des <- model.matrix(~ T6M_SDAIscore, data = as.data.frame(y))
+               colnames(des) <- c('T6M_SDAIscore')
+               mod <- eBayes(lmFit(t(x), des))
+               top <- topTable(mod, coef = c('T6M_SDAIscore'), number = Inf, sort.by = 'p')
+               p <- top$P.Value
+               names(p) <- rownames(top)
+               return(p)
+             },
+             
+             filter  = function(score, x, y) score <= 0.01)  # Sets a p-value threshold of 0.01
+
+
+
+sbfCtrl <- sbfControl(method = 'repeatedcv', repeats = 10, functions = filt, multivariate = TRUE)
+
+fit <- sbf(x = dummydata, y = as.data.frame(T6M_SDAIscore), sbfControl = sbfCtrl)
+
+
+
+###### Error in `[.data.frame`(data, , "pred") : undefined columns selected
+
+
+
+
+
+
+
