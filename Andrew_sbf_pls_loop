@@ -1,0 +1,102 @@
+library(limma)
+set.seed(123)
+library(car)
+library(caret)
+library(pls)
+
+
+#setwd("~/RA-MAP")
+
+
+clin = readRDS("RA_MAP_CLIN.rds")
+test = readRDS("RA_MAP_TEST.rds")
+FACS = read.csv("BLFACSdata.csv")
+FACSID = read.csv("PatientID.csv")
+clin = read.csv("clinical_everything.csv")
+load("save_filter.RData")
+
+############# get data
+test = test[2:ncol(test)]
+
+tmydf = as.matrix(setNames(data.frame(t(test[,-1])), test[,1]))
+
+
+test2= as.data.frame(tmydf[rownames(tmydf) %in% save_filter,])
+
+tmydf2 = setNames(data.frame(t(test2[,-1])), test2[,1])
+
+tmydf2 = na.omit(as.data.frame(t(test2)))
+
+############# add pt ID to facs
+FACS2 = merge.default(FACSID,FACS)
+
+FACS2 = FACS2[-1]
+FACS2 = FACS2[-2]
+
+colnames(FACS2)[1] = "SubjectID"
+
+
+############# merge trans and facs then transform FACS
+tmydf2$SubjectID = rownames(tmydf2)
+
+testFACS = na.omit(merge.default(tmydf2,FACS2))
+
+testFACS$BRIGHT.NK.CELLS.CD158. = testFACS$BRIGHT.NK.CELLS.CD158.*0.8
+
+testFACS[25129:25209] = logit(testFACS[25129:25209], percents = T)
+
+
+############# merge clinical variables
+
+EULAR = na.omit(clin[c(2,60,25,89)])
+
+eulartest = merge.default(EULAR, testFACS)
+
+
+############# get red data for transpose
+
+
+red_data = eulartest[-c(2:4)]
+
+tmydf = setNames(data.frame(t(red_data[,-1])), red_data[,1])
+
+DF = as.matrix(as.data.frame(lapply(tmydf, as.numeric)))
+
+rownames(DF) = rownames(tmydf)
+
+clin3 = eulartest[2:4]
+
+
+############# sbf function list
+
+
+
+filt <- list(summary = defaultSummary,
+             fit     = function(x, y) {
+               train(x, y, method = 'pls', preProc = 'center', 
+                     trControl = trainControl(method = 'cv', number = 3))
+             },
+             pred    = function(object, x) predict(object, x),
+             score   = function(x, y) {  
+               mod <- eBayes(lmFit(t(x), model.matrix(~ y)))
+               top <- topTable(mod, coef = 'y', number = Inf)
+               p <- top$P.Value
+               names(p) <- rownames(top)
+               return(p)
+             },
+             filter  = function(score, x, y) score <= 0.01)
+
+
+############# sbf control
+sbfCtrl <- sbfControl(method = 'cv', number = 3, functions = filt, multivariate = TRUE)
+
+
+dat_in  <- cbind(t(DF),clin3[1:3])
+form_in <- as.formula(TBase_SDAIscore + T3M_SDAIscore + T6M_SDAIscore ~ .)
+fit     <- sbf(form_in, data = dat_in, sbfControl = sbfCtrl)
+
+
+
+save(fit, file = "fit_sbf_pls.RData")
+
+
